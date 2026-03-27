@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"testing"
 
 	"poc-testcontainers/internal/entity"
@@ -13,15 +15,28 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+var shared *testdb.SharedPostgres
+
+func TestMain(m *testing.M) {
+	shared = testdb.NewSharedPostgres()
+	if err := shared.Start(); err != nil {
+		fmt.Printf("FATAL: falha ao subir container: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("\n=== CONTAINER STARTUP: %s ===\n\n", shared.StartupTime.Round(1e6))
+
+	code := m.Run()
+
+	shared.Stop()
+	os.Exit(code)
+}
+
 // =============================================================================
-// Testes com Testcontainers (Postgres real)
-// Estes testes rodam contra Postgres e cobrem cenários que SQLite não suporta.
+// Testes com Testcontainers (Postgres real) — container compartilhado
 // =============================================================================
 
 func TestPostgres_CreateAndFind(t *testing.T) {
-	db, cleanup := testdb.NewPostgresDB(t, &entity.Transaction{})
-	defer cleanup()
-
+	db := shared.NewDB(t, &entity.Transaction{})
 	repo := NewTransactionRepository(db)
 	ctx := context.Background()
 	merchantID := uuid.New()
@@ -48,9 +63,7 @@ func TestPostgres_CreateAndFind(t *testing.T) {
 }
 
 func TestPostgres_SumByMerchant(t *testing.T) {
-	db, cleanup := testdb.NewPostgresDB(t, &entity.Transaction{})
-	defer cleanup()
-
+	db := shared.NewDB(t, &entity.Transaction{})
 	repo := NewTransactionRepository(db)
 	ctx := context.Background()
 	merchantID := uuid.New()
@@ -73,9 +86,7 @@ func TestPostgres_SumByMerchant(t *testing.T) {
 // TestPostgres_FindByMetadata_JSONB demonstra query com operador @> do Postgres.
 // Este teste FALHA com SQLite porque @> não existe lá.
 func TestPostgres_FindByMetadata_JSONB(t *testing.T) {
-	db, cleanup := testdb.NewPostgresDB(t, &entity.Transaction{})
-	defer cleanup()
-
+	db := shared.NewDB(t, &entity.Transaction{})
 	repo := NewTransactionRepository(db)
 	ctx := context.Background()
 
@@ -88,7 +99,6 @@ func TestPostgres_FindByMetadata_JSONB(t *testing.T) {
 	}
 	require.NoError(t, repo.Create(ctx, tx))
 
-	// Query usando operador JSONB do Postgres
 	results, err := repo.FindByMetadata(ctx, "channel", "mobile")
 	require.NoError(t, err)
 	assert.Len(t, results, 1)
